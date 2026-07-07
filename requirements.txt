@@ -1,0 +1,25 @@
+# Lucid Lineage — Python dependencies
+# Pinned to reflect the CURRENT active state of the code (direct imports only).
+# Transitive dependencies (e.g. google-genai, pulled in by langchain-google-genai)
+# are resolved automatically by pip and intentionally NOT listed here.
+# Lower bounds match the versions verified in the active virtual environment.
+
+# ─── LLM orchestration (LangChain 1.x) ──────────────────────────────────
+langchain-classic>=1.0.8,<2.0.0
+langchain-core>=1.4.8,<2.0.0
+langchain-google-genai>=4.2.6,<5.0.0
+
+# ─── Graph database (Neo4j 6.x driver) ──────────────────────────────────
+neo4j>=6.2.0,<7.0.0
+
+# ─── MCP tool bridging ──────────────────────────────────────────────────
+fastmcp>=3.4.2,<4.0.0
+
+# ─── Observability (OpenTelemetry) ──────────────────────────────────────
+opentelemetry-api>=1.43.0
+opentelemetry-sdk>=1.43.0
+
+# ─── Presentation & utilities ───────────────────────────────────────────
+streamlit>=1.58.0
+python-dotenv>=1.2.2
+requests>=2.34.2
