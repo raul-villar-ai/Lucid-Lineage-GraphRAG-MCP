@@ -1,13 +1,16 @@
-# Lucid Lineage
+Status: Work In Progress (Personal Exploratory PoC)
 
-**Lucid Lineage** is an enterprise-grade sovereign data lineage and compliance AI agent[cite: 4]. Designed for highly regulated environments (public sector, finance), it maps secure infrastructure dependencies and autonomously enforces data boundary compliance using GraphRAG architecture[cite: 4].
+# Lucid Lineage GraphRAG MCP
+
+**Lucid Lineage** is a personal proof-of-concept (PoC) and exploratory project demonstrating the practical application of agentic AI and Knowledge GraphRAG (Retrieval-Augmented Generation) technology. It explores how an autonomous orchestration framework can map mock infrastructure dependencies and evaluate data boundary anomalies within a simulated sandbox environment.
 
 ## Project Summary
-Moving beyond standard threat-triage engines, Lucid Lineage utilizes a **Neo4j knowledge graph** to trace data flows and identify compliance violations (e.g., GDPR, SOX, CCPA)[cite: 4]. It leverages a LangChain-orchestrated reasoning agent to traverse this graph, execute deterministic compliance tools, and log immutable audit findings back into the database[cite: 4].
+This project evaluates how a **Neo4j knowledge graph** can be paired with LLM-driven reasoning to trace simulated data flows and analyze mock compliance constraints (such as illustrative GDPR, SOX, or CCPA frameworks). It leverages a LangChain-orchestrated reasoning agent to traverse an experimental graph database, test deterministic graph-querying tools, and log simulated audit findings back into the database for analysis.
 
 ## Codebase Guide
 
-The system is a **GraphRAG compliance auditor**: a LangChain agent (backed by **Google Gemini**) reasons over a **Neo4j** knowledge graph, calls deterministic graph tools, and writes immutable audit findings back to the graph. At runtime a presentation entry point calls `run_trace()`, which lets the agent choose graph tools; those tools execute parameterized Cypher through a singleton driver against Neo4j.
+The project serves as an **exploratory GraphRAG architecture pattern**: a LangChain agent (backed by **Google Gemini**) reasons over a mock **Neo4j** knowledge graph, interacts with deterministic graph tools, and logs simulated findings back to the graph environment. At runtime, a presentation entry point calls `run_trace()`, which lets the agent evaluate and select appropriate graph tools; those tools execute parameterized Cypher through a singleton driver against the Neo4j instance.
+
 
 ```
 app.py / main.py   →   run_trace()          →   Gemini selects tools
