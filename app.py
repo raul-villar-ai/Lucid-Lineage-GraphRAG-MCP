@@ -3,8 +3,9 @@ import uuid
 import json
 from dotenv import load_dotenv
 from src.agent import run_trace
-from src.llm import build_llm
+from src.llm import build_llm, active_provider
 from src.telemetry import init_telemetry
+from src.graph_admin import reset_graph, is_graph_modified, security_status
 
 # Initialize observability
 init_telemetry()
@@ -43,6 +44,73 @@ def clean_agent_response(raw_response):
         
     return str(raw_response)
 
+# 2b. Dashboard indicators (graph drift + security traffic light)
+def render_graph_state(container):
+    """Show whether the graph has drifted from the seeded baseline."""
+    try:
+        modified = is_graph_modified()
+    except Exception as e:
+        container.caption(f"Graph state unavailable: {e}")
+        return
+    if modified is None:
+        container.info("◽ Baseline not set — click **Reset Graph** to establish it.")
+    elif modified:
+        container.warning("🟠 Graph **MODIFIED** — differs from seed")
+    else:
+        container.success("🟢 Graph **pristine** — matches seed")
+
+
+def render_security_light(container, status=None):
+    """Render the security traffic light for the LAST query's result.
+
+    ``status`` is the dict captured from security_status() at the last query, or
+    None when no query has been run yet in this session — in which case all lamps
+    are shown OFF with no status text or counts.
+    """
+    palette = {"RED": "#e0245e", "AMBER": "#f5a623", "GREEN": "#17bf63"}
+    caption = {
+        "RED": "SECURITY ISSUE DETECTED",
+        "AMBER": "CAUTION — POSSIBLE ISSUE",
+        "GREEN": "ALL CLEAR",
+    }
+    level = status["level"] if status else None  # None => all lamps off
+
+    def lamp(color, active):
+        glow = f"box-shadow:0 0 12px 2px {color};" if active else ""
+        return (
+            f"<div style='width:26px;height:26px;border-radius:50%;"
+            f"background:{color};opacity:{'1' if active else '0.15'};{glow}'></div>"
+        )
+
+    housing = (
+        "<div style='display:flex;flex-direction:column;gap:7px;background:#111;"
+        "padding:9px;border-radius:10px;'>"
+        f"{lamp(palette['RED'], level == 'RED')}"
+        f"{lamp(palette['AMBER'], level == 'AMBER')}"
+        f"{lamp(palette['GREEN'], level == 'GREEN')}"
+        "</div>"
+    )
+
+    if status is None:
+        body = ""  # no query run yet: lamps off, no text/warnings
+    else:
+        body = (
+            "<div>"
+            f"<div style='font-weight:700;font-size:1.05rem;color:{palette[level]};'>{caption[level]}</div>"
+            f"<div style='font-size:0.85rem;opacity:0.85;margin-top:3px;'>"
+            f"Cross-boundary leaks: <b>{status['leaks']}</b> &nbsp;•&nbsp; "
+            f"Ungoverned sensitive assets: <b>{status['ungoverned_assets']}</b> &nbsp;•&nbsp; "
+            f"Weak-encryption sensitive assets: <b>{status['weak_encryption_assets']}</b>"
+            "</div></div>"
+        )
+
+    html = (
+        "<div style='display:flex;align-items:center;gap:16px;padding:12px 16px;"
+        "border:1px solid rgba(128,128,128,0.35);border-radius:12px;max-width:660px;'>"
+        f"{housing}{body}</div>"
+    )
+    container.markdown(html, unsafe_allow_html=True)
+
 # 3. Configure Streamlit Page Layout
 st.set_page_config(page_title="Lucid Lineage: Forensic Workspace", layout="wide")
 
@@ -59,7 +127,7 @@ def load_live_agent():
     # Model configuration lives in src/llm.py (single source of truth).
     llm = build_llm()
     if llm is None:
-        st.error("❌ GOOGLE_API_KEY is missing from your .env file!")
+        st.error(f"❌ No API key found for the '{active_provider()}' LLM provider. Check your .env file.")
     return llm
 
 live_agent = load_live_agent()
@@ -82,11 +150,45 @@ clearance = st.sidebar.selectbox(
 if st.sidebar.button("Reset Session"):
     st.session_state.session_id = str(uuid.uuid4())
     st.session_state.chat_history = []
+    st.session_state.pop("last_security", None)  # clear traffic light until next query
     st.rerun()
+
+# --- Graph Controls ---
+st.sidebar.divider()
+st.sidebar.subheader("🗄️ Graph Controls")
+
+if st.sidebar.button("♻️ Reset Graph to Seed",
+                     help="Wipe the graph and re-seed it from data/init_graph.cypher"):
+    with st.spinner("Re-seeding graph from init_graph.cypher..."):
+        try:
+            summary = reset_graph()
+            # The reset also wipes graph memory, so start a fresh UI session too.
+            st.session_state.session_id = str(uuid.uuid4())
+            st.session_state.chat_history = []
+            st.session_state.pop("last_security", None)  # traffic light off until next query
+            if summary["errors"]:
+                st.sidebar.warning(
+                    f"Reset completed with {len(summary['errors'])} statement error(s)."
+                )
+            else:
+                st.sidebar.success("Graph reset to initial seed state.")
+        except Exception as e:
+            st.sidebar.error(f"Reset failed: {e}")
+    st.rerun()
+
+# Live indicator: has the graph drifted from the seeded baseline?
+graph_state_ph = st.sidebar.empty()
+render_graph_state(graph_state_ph)
 
 # 7. Main Workspace Layout UI
 st.title("Lucid Lineage: Forensic Workspace")
 st.caption("Immutable Graph-Based Auditing Engine")
+
+# Security traffic light — reflects the LAST query's result (off until a query runs)
+st.subheader("🚦 Security Status")
+security_ph = st.empty()
+render_security_light(security_ph, st.session_state.get("last_security"))
+
 st.divider()
 
 # Display initialization status if conversation hasn't started
@@ -126,3 +228,11 @@ if prompt := st.chat_input("Trace the lineage..."):
         st.session_state.chat_history.append({"role": "assistant", "content": final_response})
     else:
         st.error("Trace failed. Check your terminal logs for Neo4j or API exceptions.")
+
+    # Capture the security posture as of THIS query, then refresh the indicators.
+    try:
+        st.session_state.last_security = security_status()
+    except Exception:
+        st.session_state.last_security = None
+    render_security_light(security_ph, st.session_state.get("last_security"))
+    render_graph_state(graph_state_ph)

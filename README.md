@@ -26,11 +26,12 @@ A core principle is **single-source-of-truth**: all Cypher lives in `src/graph_t
 
 ### Orchestration layer
 * `src/agent.py` — The core. Defines the six LangChain `@tool` wrappers, the Neo4j-backed chat memory (`get_graph_memory` / `save_graph_memory`, including primitive-serialization normalization), and `run_trace()` — the main pipeline (bounded history → role/clearance-aware prompt → `create_tool_calling_agent` + `AgentExecutor` with iteration/time caps → normalized, persisted answer). Falls back to a mock response when no LLM is supplied.
-* `src/llm.py` — Gemini model factory and single source of truth for model configuration (`gemini-3.5-flash`, temperature 0, retries, timeout).
+* `src/llm.py` — LLM factory & **provider toggle**: builds either Google Gemini (`gemini-3.5-flash`) or OpenAI (`gpt-4o-mini`), selected via `LLM_PROVIDER` in `.env` (or the `DEFAULT_PROVIDER` constant). Single source of truth for model config.
 
 ### Data access layer
 * `src/graph_tools.py` — The unified Cypher query layer; all Neo4j business logic. Six tools: asset-lineage trace, co-location "blast radius", compliance-boundary check, write audit finding, retrieve past findings, and the cross-boundary leak scan. All queries are parameterized (injection-safe).
 * `src/db.py` — Thread-safe singleton Neo4j driver (bounded connection pool + acquisition timeout), plus connectivity verification and graceful shutdown.
+* `src/graph_admin.py` — Graph administration & health: reseeds the graph from the canonical Cypher, detects drift from the seeded baseline (SHA-256 fingerprint), and computes the dashboard security "traffic light".
 
 ### Tool bridging & observability
 * `src/mcp_server.py` — FastMCP server exposing the same six tools via the Model Context Protocol, so external MCP clients use identical Cypher and schema.
@@ -58,7 +59,7 @@ A core principle is **single-source-of-truth**: all Cypher lives in `src/graph_t
 ### Configuration & documentation
 * `.env` — Secrets/config: Neo4j credentials, `GOOGLE_API_KEY`, `PROJECT_ID` (gitignored).
 * `requirements.txt` — Python dependencies, aligned to the code's actual direct imports.
-* `ARCHITECTURE.md`: Core system architecture, target state, and graph schema[cite: 3].
+* `ARCHITECTURE.md`: Core system architecture, target state, and graph schema.
 * `CLEANUP_LOG.md`: Housekeeping audit trail (what was reviewed/removed and why).
 
 ### Graph schema (quick reference)
@@ -66,7 +67,7 @@ A core principle is **single-source-of-truth**: all Cypher lives in `src/graph_t
 * **Edges:** `STORED_ON`, `REPLICATED_TO`, `GOVERNED_BY`, `HAS_ACCESS`, `HAS_AUDIT_RECORD`.
 
 ## Setup Instructions
-Create a `.env` file in the root directory[cite: 4]:
+Create a `.env` file in the root directory:
 ```env
 NEO4J_URI=neo4j+s://<your-db-id>.databases.neo4j.io
 NEO4J_USER=neo4j

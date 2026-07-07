@@ -103,3 +103,80 @@ MERGE (dummy_asset)-[:REPLICATED_TO]->(backup_node)
 
 MERGE (prod_node)-[:GOVERNED_BY]->(uk_sovereign)
 MERGE (backup_node)-[:GOVERNED_BY]->(ccpa_zone);
+
+// ============================================================================
+// 9. EXTENDED ENTERPRISE TOPOLOGY (enrichment for robust test coverage)
+// ============================================================================
+// Additive only: this section does NOT remove any Section 1-8 nodes or edges, so
+// the existing test scenarios (TC1-TC3) remain intact. It is written entirely
+// with MERGE (matching the Section 1-8 nodes it links to by name) so it is
+// idempotent and safe to re-run. Goals:
+//   * Give APAC_Edge_Gateway explicit UPSTREAM data pipelines so "upstream
+//     dependencies feeding into the APAC gateway" (TC3) is unambiguous.
+//   * Add a second, clean cross-boundary leak (PCI -> APAC) for TC2-style audits.
+//   * Broaden boundaries / nodes / assets / classifications for future tests.
+
+// --- New compliance boundaries -------------------------------------------
+MERGE (apac_sov:Compliance_Boundary {name: 'APAC_Data_Sovereignty'})
+  ON CREATE SET apac_sov.policy = 'Regional_Data_Residency_Required', apac_sov.tier = 'Strict'
+MERGE (pci:Compliance_Boundary {name: 'PCI_DSS_Payments'})
+  ON CREATE SET pci.policy = 'Cardholder_Data_Isolation', pci.tier = 'Critical'
+MERGE (hipaa:Compliance_Boundary {name: 'HIPAA_Health_Data'})
+  ON CREATE SET hipaa.policy = 'PHI_Encryption_And_Access_Control', hipaa.tier = 'Strict'
+
+// --- New compute nodes ----------------------------------------------------
+MERGE (tokyo:Compute_Node {name: 'APAC_Tokyo_Cloud_01'})
+  ON CREATE SET tokyo.type = 'Public_Cloud', tokyo.encryption = 'AES-256'
+MERGE (sg_analytics:Compute_Node {name: 'APAC_Singapore_Analytics'})
+  ON CREATE SET sg_analytics.type = 'Public_Cloud', sg_analytics.encryption = 'Standard'
+MERGE (pay_proc:Compute_Node {name: 'US_Payments_Processor'})
+  ON CREATE SET pay_proc.type = 'Private_Cloud', pay_proc.encryption = 'AES-256'
+MERGE (eu_health:Compute_Node {name: 'EU_Health_Cluster'})
+  ON CREATE SET eu_health.type = 'Private_Cloud', eu_health.encryption = 'AES-256'
+
+// --- Governance for the new nodes ----------------------------------------
+MERGE (tokyo)-[:GOVERNED_BY]->(apac_sov)
+MERGE (sg_analytics)-[:GOVERNED_BY]->(apac_sov)
+MERGE (pay_proc)-[:GOVERNED_BY]->(pci)
+MERGE (eu_health)-[:GOVERNED_BY]->(hipaa)
+
+// --- New data assets ------------------------------------------------------
+MERGE (supply_tel:Data_Asset {name: 'Global_Supply_Telemetry'})
+  ON CREATE SET supply_tel.classification = 'Internal_Only'
+MERGE (card_vault:Data_Asset {name: 'Cardholder_Transaction_Vault'})
+  ON CREATE SET card_vault.classification = 'Highly_Restricted'
+MERGE (phr:Data_Asset {name: 'Patient_Health_Records'})
+  ON CREATE SET phr.classification = 'Highly_Restricted'
+MERGE (apac_sales:Data_Asset {name: 'APAC_Regional_Sales'})
+  ON CREATE SET apac_sales.classification = 'Restricted'
+MERGE (vendor_repo:Data_Asset {name: 'Vendor_Contract_Repository'})
+  ON CREATE SET vendor_repo.classification = 'Restricted'
+
+// --- New service accounts -------------------------------------------------
+MERGE (svc_apac:Service_Account {name: 'SVC_APAC_Ingest_Pipeline'})
+  ON CREATE SET svc_apac.role = 'Automated_Pipeline', svc_apac.privilege = 'Read_Write'
+MERGE (svc_pay:Service_Account {name: 'SVC_Payments_Gateway'})
+  ON CREATE SET svc_pay.role = 'API_Gateway', svc_pay.privilege = 'Read_Write'
+
+// --- Anchor existing Section 1-2 nodes we link to (matched by name) --------
+MERGE (apac_edge:Compute_Node {name: 'APAC_Edge_Gateway'})
+MERGE (us_vault:Compute_Node {name: 'US_HQ_Mainframe_Vault'})
+
+// --- Well-governed placements (compliant; no cross-boundary) --------------
+MERGE (phr)-[:STORED_ON]->(eu_health)
+MERGE (vendor_repo)-[:STORED_ON]->(tokyo)
+MERGE (apac_sales)-[:STORED_ON]->(tokyo)
+
+// --- Explicit UPSTREAM pipelines feeding INTO APAC_Edge_Gateway (TC3) ------
+MERGE (supply_tel)-[:STORED_ON]->(us_vault)
+MERGE (supply_tel)-[:REPLICATED_TO {method: 'Edge_Sync'}]->(apac_edge)
+MERGE (apac_sales)-[:REPLICATED_TO {method: 'Regional_Aggregation'}]->(apac_edge)
+
+// --- New INTENTIONAL cross-boundary violation (PCI -> APAC) ----------------
+MERGE (card_vault)-[:STORED_ON]->(pay_proc)
+MERGE (card_vault)-[:REPLICATED_TO {method: 'Shadow_Analytics_Pipeline'}]->(sg_analytics)
+
+// --- New service-account access edges --------------------------------------
+MERGE (svc_apac)-[:HAS_ACCESS]->(supply_tel)
+MERGE (svc_apac)-[:HAS_ACCESS]->(apac_sales)
+MERGE (svc_pay)-[:HAS_ACCESS]->(card_vault);
