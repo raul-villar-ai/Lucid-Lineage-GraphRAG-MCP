@@ -151,14 +151,42 @@ def is_graph_modified() -> bool | None:
 
 # ─── Security traffic light ─────────────────────────────────────────────
 
+def _classify(leaks: int, ungoverned: int, weak_enc: int) -> dict:
+    """Map raw security counts onto the RED/AMBER/GREEN traffic-light dict.
+
+    Shared by both the whole-graph scan (``security_status``) and the
+    per-submission scoped scan (``security_status_for_assets``) so the two can
+    never drift apart.
+    """
+    cautions = int(ungoverned) + int(weak_enc)
+    if int(leaks) > 0:
+        level = "RED"
+    elif cautions > 0:
+        level = "AMBER"
+    else:
+        level = "GREEN"
+
+    return {
+        "level": level,
+        "leaks": int(leaks),
+        "ungoverned_assets": int(ungoverned),
+        "weak_encryption_assets": int(weak_enc),
+    }
+
+
 def security_status() -> dict:
-    """Deterministic security 'traffic light' from a live graph scan.
+    """Deterministic security 'traffic light' from a live WHOLE-GRAPH scan.
 
     * RED   — cross-boundary data leaks exist (an asset sits on compute nodes
               governed by *different* compliance boundaries).
     * AMBER — caution signals only: sensitive data on an ungoverned node, or
               sensitive data under weak encryption. Possible issue, unconfirmed.
     * GREEN — no leaks and no caution signals.
+
+    This scans the ENTIRE graph, so its result is invariant to any individual
+    chat query — use it for the "run a full audit" case. For a status that
+    reflects the specific asset(s) a submission investigated, use
+    ``security_status_for_assets`` instead.
 
     Returns ``{level, leaks, ungoverned_assets, weak_encryption_assets}``.
     """
@@ -167,7 +195,7 @@ def security_status() -> dict:
             """
             MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)
             MATCH (d)-[:STORED_ON|REPLICATED_TO]->(c2:Compute_Node)-[:GOVERNED_BY]->(b2:Compliance_Boundary)
-            WHERE b1 <> b2
+            WHERE c1 <> c2 AND b1 <> b2
             RETURN count(DISTINCT d) AS n
             """
         ).single()["n"]
@@ -192,20 +220,81 @@ def security_status() -> dict:
             sensitive=_SENSITIVE, weak=_WEAK_ENCRYPTION,
         ).single()["n"]
 
-    cautions = int(ungoverned) + int(weak_enc)
-    if int(leaks) > 0:
-        level = "RED"
-    elif cautions > 0:
-        level = "AMBER"
-    else:
-        level = "GREEN"
+    return _classify(leaks, ungoverned, weak_enc)
 
-    return {
-        "level": level,
-        "leaks": int(leaks),
-        "ungoverned_assets": int(ungoverned),
-        "weak_encryption_assets": int(weak_enc),
-    }
+
+def security_status_for_assets(asset_names: list[str]) -> dict:
+    """Traffic-light status scoped to the specific assets a query touched.
+
+    Same RED/AMBER/GREEN logic as ``security_status()`` (via the shared
+    ``_classify`` helper), but every scan is restricted to ``asset_names`` so the
+    dashboard reflects THIS submission rather than the whole graph. This is what
+    makes the light change from submission to submission.
+
+    An empty list => GREEN with zero counts (nothing sensitive was investigated
+    this turn).
+
+    Returns ``{level, leaks, ungoverned_assets, weak_encryption_assets}``.
+    """
+    if not asset_names:
+        return _classify(0, 0, 0)
+
+    with get_driver().session() as session:
+        leaks = session.run(
+            """
+            MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)
+            MATCH (d)-[:STORED_ON|REPLICATED_TO]->(c2:Compute_Node)-[:GOVERNED_BY]->(b2:Compliance_Boundary)
+            WHERE c1 <> c2 AND b1 <> b2 AND d.name IN $assets
+            RETURN count(DISTINCT d) AS n
+            """,
+            assets=asset_names,
+        ).single()["n"]
+
+        ungoverned = session.run(
+            """
+            MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c:Compute_Node)
+            WHERE d.name IN $assets
+              AND d.classification IN $sensitive
+              AND NOT (c)-[:GOVERNED_BY]->(:Compliance_Boundary)
+            RETURN count(DISTINCT d) AS n
+            """,
+            assets=asset_names, sensitive=_SENSITIVE,
+        ).single()["n"]
+
+        weak_enc = session.run(
+            """
+            MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c:Compute_Node)
+            WHERE d.name IN $assets
+              AND d.classification IN $sensitive
+              AND c.encryption IN $weak
+            RETURN count(DISTINCT d) AS n
+            """,
+            assets=asset_names, sensitive=_SENSITIVE, weak=_WEAK_ENCRYPTION,
+        ).single()["n"]
+
+    return _classify(leaks, ungoverned, weak_enc)
+
+
+def assets_on_locations(location_names: list[str]) -> list[str]:
+    """Return the names of all Data_Assets stored or replicated to the given node(s).
+
+    Used to give the traffic light a meaningful scope on turns that investigate a
+    *location* (blast-radius / compliance-boundary lookups) rather than a named
+    asset — the co-located assets become the thing whose security posture the
+    light reflects. Empty input => empty list.
+    """
+    if not location_names:
+        return []
+    with get_driver().session() as session:
+        rows = session.run(
+            """
+            MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c:Compute_Node)
+            WHERE c.name IN $locations
+            RETURN DISTINCT d.name AS name
+            """,
+            locations=location_names,
+        ).data()
+    return [r["name"] for r in rows]
 
 
 def graph_summary() -> dict:

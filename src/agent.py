@@ -25,6 +25,22 @@ log = logging.getLogger("lucid_lineage.agent")
 # Prevents unbounded context growth on long-running sessions.
 MAX_MEMORY_MESSAGES = 20
 
+# Tool argument names that identify a Data_Asset. Used to work out which
+# asset(s) a submission investigated so the dashboard traffic light can reflect
+# THIS query rather than a static whole-graph scan.
+_ASSET_ARG_KEYS = ("asset_name",)
+
+# Tool argument names that identify a Compute_Node (a location). Turns that only
+# investigate a location (e.g. blast-radius or compliance-boundary lookups) are
+# resolved to the assets co-located there, so the traffic light still reflects
+# something meaningful instead of going dark.
+_LOCATION_ARG_KEYS = ("location_name", "compute_node")
+
+# The full-graph leak audit tool. When a submission runs this, the correct
+# per-submission status IS the whole-graph scan, so callers should fall back to
+# security_status() instead of the asset-scoped variant.
+_FULL_SCAN_TOOL = "audit_restricted_asset_leaks"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # LANGCHAIN TOOL WRAPPERS
@@ -178,14 +194,73 @@ TOOLS = [
 ]
 
 
+def _extract_query_scope(intermediate_steps) -> tuple[list[str], list[str], bool]:
+    """Inspect the agent's tool calls to work out what THIS submission investigated.
+
+    Returns ``(touched_assets, touched_locations, full_scan_ran)`` where:
+      * ``touched_assets``    — de-duplicated Data_Asset names passed to any tool
+        this turn (order preserved), used for the asset-scoped traffic light.
+      * ``touched_locations`` — de-duplicated Compute_Node names investigated this
+        turn; the caller resolves these to their co-located assets so the light
+        stays meaningful on location-only follow-ups instead of going dark.
+      * ``full_scan_ran``     — True if the agent ran the whole-graph leak audit,
+        in which case the caller should use the global ``security_status()``.
+
+    ``intermediate_steps`` is the ``(AgentAction, observation)`` list returned by
+    the AgentExecutor when ``return_intermediate_steps=True``.
+    """
+    touched_assets: list[str] = []
+    touched_locations: list[str] = []
+    full_scan_ran = False
+
+    for step in intermediate_steps or []:
+        # Each step is an (AgentAction, observation) tuple.
+        action = step[0] if isinstance(step, (list, tuple)) and step else step
+        tool_name = getattr(action, "tool", None)
+        tool_input = getattr(action, "tool_input", None)
+
+        if tool_name == _FULL_SCAN_TOOL:
+            full_scan_ran = True
+
+        if isinstance(tool_input, dict):
+            for key in _ASSET_ARG_KEYS:
+                value = tool_input.get(key)
+                if isinstance(value, str) and value.strip():
+                    touched_assets.append(value.strip())
+            for key in _LOCATION_ARG_KEYS:
+                value = tool_input.get(key)
+                if isinstance(value, str) and value.strip():
+                    touched_locations.append(value.strip())
+
+    # De-duplicate while preserving first-seen order.
+    touched_assets = list(dict.fromkeys(touched_assets))
+    touched_locations = list(dict.fromkeys(touched_locations))
+    return touched_assets, touched_locations, full_scan_ran
+
+
 @trace_tool(name="agent_run_trace")
-def run_trace(session_id, query, clearance, iam_role="Security_Analyst", agent_llm=None, **kwargs):
+def run_trace(session_id, query, clearance, iam_role="Security_Analyst",
+              agent_llm=None, return_details=False, **kwargs):
     """
     Execute a lineage trace using an AgentExecutor bound to Graph Tools.
 
     This is the primary entry point consumed by both the Streamlit UI (app.py)
     and the CLI terminal (main.py). The function signature is intentionally
     kept stable as a public contract.
+
+    By default this returns the final answer as a plain string (unchanged
+    behaviour for main.py). When ``return_details=True`` it instead returns a
+    dict::
+
+        {
+            "answer":            <final answer string>,
+            "touched_assets":    [<Data_Asset names this submission investigated>],
+            "touched_locations": [<Compute_Node names this submission investigated>],
+            "full_scan":         <True if the whole-graph leak audit ran this turn>,
+        }
+
+    so the dashboard can render a traffic light scoped to THIS submission rather
+    than a static whole-graph scan.
     """
     # 1. Load bounded chat history from the graph
     raw_history = get_graph_memory(session_id)
@@ -203,6 +278,9 @@ def run_trace(session_id, query, clearance, iam_role="Security_Analyst", agent_l
     if not agent_llm:
         mock_response = f"[Mock] No LLM provided. Query received: {query}"
         save_graph_memory(session_id, "assistant", mock_response)
+        if return_details:
+            return {"answer": mock_response, "touched_assets": [],
+                    "touched_locations": [], "full_scan": False}
         return mock_response
 
     # 4. Build the agent prompt with role-based context
@@ -219,6 +297,21 @@ def run_trace(session_id, query, clearance, iam_role="Security_Analyst", agent_l
         "Node and asset names are EXACT, case-sensitive identifiers (e.g. 'APAC_Edge_Gateway', "
         "not 'APAC gateway'). If a lookup returns no results, do NOT repeatedly guess name "
         "variations — reason from the data you already have or run a broader scan instead. "
+        # --- Write discipline: never mutate the graph unless explicitly asked ---
+        "Only call log_audit_finding when the user EXPLICITLY asks you to log, record, or "
+        "write a finding. Do NOT log a finding as an automatic side effect of tracing, "
+        "identifying, or auditing — tracing and identifying are read-only actions. "
+        # --- Answer the question that was actually asked ---
+        "When the user asks about a specific data classification (e.g. 'Highly_Restricted'), "
+        "restrict your answer AND any counts to assets of that exact classification; never "
+        "report the unfiltered total as if it answered the narrower question. "
+        "Report counts as the number of DISTINCT affected assets, not the number of rows a "
+        "tool returns — a single asset may appear in several rows. "
+        # --- Ground findings strictly in retrieved data ---
+        "When logging a finding, reference ONLY the compliance boundaries, policies, and "
+        "relationships that appear in tool results you actually retrieved for that asset. "
+        "Never attribute a boundary or policy to an asset unless a tool result shows that "
+        "exact relationship. "
         "Once you have gathered enough information to answer, STOP calling tools and provide "
         "your final summary."
     )
@@ -242,6 +335,7 @@ def run_trace(session_id, query, clearance, iam_role="Security_Analyst", agent_l
             max_execution_time=120,  # wall-clock cap: stop gracefully before upstream timeouts/disconnects
             handle_parsing_errors=True,
             early_stopping_method="force", # PATCHED: Set to 'force' to prevent legacy termination loops from crashing
+            return_intermediate_steps=True,  # needed to scope the security traffic light to this submission
         )
 
         result = agent_executor.invoke({
@@ -249,14 +343,31 @@ def run_trace(session_id, query, clearance, iam_role="Security_Analyst", agent_l
             "chat_history": lc_history,
         })
 
+        # Work out what this submission actually investigated BEFORE normalizing,
+        # so the dashboard can show a per-query status instead of a static scan.
+        touched_assets, touched_locations, full_scan = _extract_query_scope(
+            result.get("intermediate_steps")
+        )
+
         # Normalize before persisting/returning: Gemini may hand back a list of
         # content blocks, which is not a valid Neo4j primitive and would break
         # both graph memory and downstream display.
         final_output = _normalize_to_text(result.get("output", "Agent returned no output."))
         save_graph_memory(session_id, "assistant", final_output)
+
+        if return_details:
+            return {
+                "answer": final_output,
+                "touched_assets": touched_assets,
+                "touched_locations": touched_locations,
+                "full_scan": full_scan,
+            }
         return final_output
 
     except Exception as e:
         error_msg = f"Agent invocation failed: {e}"
         log.error(error_msg, exc_info=True)
+        if return_details:
+            return {"answer": error_msg, "touched_assets": [],
+                    "touched_locations": [], "full_scan": False}
         return error_msg

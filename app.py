@@ -5,7 +5,13 @@ from dotenv import load_dotenv
 from src.agent import run_trace
 from src.llm import build_llm, active_provider
 from src.telemetry import init_telemetry
-from src.graph_admin import reset_graph, is_graph_modified, security_status
+from src.graph_admin import (
+    reset_graph,
+    is_graph_modified,
+    security_status,
+    security_status_for_assets,
+    assets_on_locations,
+)
 
 # Initialize observability
 init_telemetry()
@@ -63,7 +69,8 @@ def render_graph_state(container):
 def render_security_light(container, status=None):
     """Render the security traffic light for the LAST query's result.
 
-    ``status`` is the dict captured from security_status() at the last query, or
+    ``status`` is the dict captured from the last query (scoped to the asset(s)
+    that query investigated, or the whole-graph scan when a full audit ran), or
     None when no query has been run yet in this session — in which case all lamps
     are shown OFF with no status text or counts.
     """
@@ -110,6 +117,36 @@ def render_security_light(container, status=None):
         f"{housing}{body}</div>"
     )
     container.markdown(html, unsafe_allow_html=True)
+
+
+def compute_submission_status(details: dict):
+    """Derive the traffic-light status for a single chat submission.
+
+    * If the submission ran the whole-graph leak audit, the global
+      ``security_status()`` IS the correct answer for that turn.
+    * Otherwise, scope the status to the asset(s) the submission investigated —
+      directly (named assets) and/or via any location it looked at, resolved to
+      the assets co-located there. This keeps the light meaningful on
+      location-only follow-ups (e.g. blast-radius questions) instead of going
+      dark, and lets it change from submission to submission.
+    * If nothing asset- or location-related was touched, return None (lamps off).
+    """
+    try:
+        if details.get("full_scan"):
+            return security_status()
+
+        assets = list(details.get("touched_assets") or [])
+        locations = details.get("touched_locations") or []
+        if locations:
+            assets.extend(assets_on_locations(locations))
+
+        # De-duplicate while preserving order.
+        assets = list(dict.fromkeys(assets))
+        if assets:
+            return security_status_for_assets(assets)
+        return None
+    except Exception:
+        return None
 
 # 3. Configure Streamlit Page Layout
 st.set_page_config(page_title="Lucid Lineage: Forensic Workspace", layout="wide")
@@ -210,16 +247,17 @@ if prompt := st.chat_input("Trace the lineage..."):
     
     # Process the pipeline with a loading indicator
     with st.spinner("Analyzing data lineage via graph memory..."):
-        raw_response = run_trace(
+        details = run_trace(
             session_id=st.session_state.session_id,
             query=prompt,
             clearance=clearance,
             iam_role=iam_role,
-            agent_llm=live_agent
+            agent_llm=live_agent,
+            return_details=True,  # also surfaces which asset(s) this submission investigated
         )
-        
+
         # ---> Apply the cleaning function before rendering <---
-        final_response = clean_agent_response(raw_response)
+        final_response = clean_agent_response(details["answer"])
     
     # Render and save the live AI output if successfully returned
     if final_response:
@@ -229,10 +267,8 @@ if prompt := st.chat_input("Trace the lineage..."):
     else:
         st.error("Trace failed. Check your terminal logs for Neo4j or API exceptions.")
 
-    # Capture the security posture as of THIS query, then refresh the indicators.
-    try:
-        st.session_state.last_security = security_status()
-    except Exception:
-        st.session_state.last_security = None
+    # Capture the security posture as of THIS query (scoped to what it touched),
+    # then refresh the indicators.
+    st.session_state.last_security = compute_submission_status(details)
     render_security_light(security_ph, st.session_state.get("last_security"))
     render_graph_state(graph_state_ph)

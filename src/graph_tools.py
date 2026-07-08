@@ -176,21 +176,38 @@ def query_past_findings(asset_name: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# TOOL: Restricted Asset Leak Audit (NEWLY IMPLEMENTED)
+# TOOL: Restricted Asset Leak Audit
 # ═══════════════════════════════════════════════════════════════════════
 
 @trace_tool()
 def query_restricted_asset_leaks() -> str:
     """Scan the entire graph for data assets that cross compliance boundaries.
 
-    Detects assets stored or replicated across compute nodes governed by
-    DIFFERENT compliance policies — the primary breach detection query.
-    Referenced in ARCHITECTURE.md but previously unimplemented.
+    Detects assets stored or replicated across two DIFFERENT compute nodes that
+    are governed by DIFFERENT compliance boundaries — the primary breach
+    detection query.
+
+    Correctness guards (both essential — see below):
+
+      * ``c1 <> c2`` — the two compute nodes must be physically different. Without
+        this, an asset sitting on a single node that is itself governed by more
+        than one boundary (e.g. ``US_HQ_Mainframe_Vault`` is under BOTH
+        ``Corporate_IP_Vault`` and ``SOX_Financial_Regs``) is mis-reported as a
+        "leak" even though no data is crossing anywhere. That produced false
+        positives like ``US_HQ_Mainframe_Vault -> US_HQ_Mainframe_Vault``.
+
+      * ``c1.name < c2.name`` — canonical ordering so each offending node pair is
+        returned exactly once. Without it the symmetric MATCH yields every leak
+        twice (A->B and B->A are the same incident), which previously inflated
+        the reported total (e.g. 20 rows for what is really a handful of assets).
+
+    The headline count reports DISTINCT affected assets; the JSON detail still
+    lists every offending node/boundary pairing for drill-down.
     """
     query = """
     MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)
     MATCH (d)-[:STORED_ON|REPLICATED_TO]->(c2:Compute_Node)-[:GOVERNED_BY]->(b2:Compliance_Boundary)
-    WHERE b1 <> b2
+    WHERE c1.name < c2.name AND b1 <> b2
     RETURN DISTINCT
            d.name           AS asset,
            d.classification AS classification,
@@ -200,13 +217,17 @@ def query_restricted_asset_leaks() -> str:
            c2.name          AS node_b,
            b2.name          AS boundary_b,
            b2.policy        AS policy_b
+    ORDER BY classification, asset, node_a, node_b
     """
     try:
         records = _run_read(query)
         if not records:
             return "SUCCESS: No cross-boundary data leaks detected."
+        distinct_assets = sorted({r["asset"] for r in records})
         return (
-            f"ALERT: {len(records)} cross-boundary leak(s) detected.\n"
+            f"ALERT: {len(distinct_assets)} asset(s) leaking across compliance "
+            f"boundaries ({len(records)} boundary-crossing path(s) detected).\n"
+            f"Leaking assets: {', '.join(distinct_assets)}\n"
             + json.dumps(records, indent=2)
         )
     except Exception as e:
