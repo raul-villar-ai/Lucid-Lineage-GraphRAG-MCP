@@ -12,6 +12,7 @@ Canonical Schema (from data/init_graph.cypher):
 
 import json
 import logging
+import re
 from src.db import get_driver
 from src.telemetry import trace_tool
 
@@ -242,3 +243,57 @@ def query_restricted_asset_leaks(classification: str | None = None) -> str:
         )
     except Exception as e:
         return f"Database query failed: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL: Location Name Resolver
+# ═══════════════════════════════════════════════════════════════════════
+
+@trace_tool()
+def resolve_location(phrase: str) -> str:
+    """Resolve a free-text location phrase to an EXACT Compute_Node name.
+
+    The agent must call this before a location-based lookup whenever the user's
+    wording is not already an exact node name, so it never silently guesses (e.g.
+    resolving 'APAC gateway' to an analytics node instead of 'APAC_Edge_Gateway').
+
+    Matching order:
+      1. Exact, case-insensitive match -> return that name.
+      2. Keyword match: score each node by how many of the phrase's word-tokens
+         appear (as substrings) in the node name; the highest-scoring node wins
+         IF it is unique.
+
+    Returns exactly one of:
+      * ``RESOLVED: <exact name>``                 - a single confident match
+      * ``AMBIGUOUS: ... Candidates: a, b``         - several equally-good matches
+      * ``NO MATCH ... Known compute nodes: ...``   - nothing matched
+    """
+    try:
+        rows = _run_read("MATCH (c:Compute_Node) RETURN c.name AS name")
+    except Exception as e:
+        return f"Database query failed: {e}"
+    names = [r["name"] for r in rows if r.get("name")]
+    if not names:
+        return "No compute nodes found in the graph."
+
+    p = phrase.strip().lower()
+    # 1. Exact, case-insensitive.
+    for n in names:
+        if n.lower() == p:
+            return f"RESOLVED: {n}"
+
+    # 2. Keyword/substring scoring on the phrase's word-tokens.
+    tokens = [t for t in re.split(r"[^a-z0-9]+", p) if t]
+    scored = [(sum(t in n.lower() for t in tokens), n) for n in names]
+    scored = [(s, n) for s, n in scored if s > 0]
+    if not scored:
+        return f"NO MATCH for '{phrase}'. Known compute nodes: {', '.join(sorted(names))}."
+
+    top = max(s for s, _ in scored)
+    winners = sorted(n for s, n in scored if s == top)
+    if len(winners) == 1:
+        return f"RESOLVED: {winners[0]}"
+    return (
+        f"AMBIGUOUS: multiple compute nodes match '{phrase}'. "
+        f"Candidates: {', '.join(winners)}. Ask the user to pick one exact name."
+    )

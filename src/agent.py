@@ -70,6 +70,16 @@ def check_compliance_boundary(compute_node: str) -> str:
 
 
 @tool
+def resolve_location(phrase: str) -> str:
+    """Resolve an informal or partial location / compute-node phrase (e.g. 'APAC
+    gateway') to an EXACT Compute_Node name. Returns the exact name on a single
+    match, or a candidate list to disambiguate. ALWAYS call this FIRST whenever the
+    user's location wording is not already an exact node name, then pass the
+    resolved name to get_assets_in_location or check_compliance_boundary."""
+    return graph_tools.resolve_location(phrase)
+
+
+@tool
 def log_audit_finding(asset_name: str, finding_type: str, details: str) -> str:
     """Logs an immutable compliance finding or security alert to the knowledge graph.
     Use this to record breaches, warnings, or verification results against an asset."""
@@ -191,6 +201,7 @@ TOOLS = [
     check_asset_lineage,
     get_assets_in_location,
     check_compliance_boundary,
+    resolve_location,
     log_audit_finding,
     retrieve_past_findings,
     audit_restricted_asset_leaks,
@@ -300,6 +311,13 @@ def run_trace(session_id, query, clearance, iam_role="Security_Analyst",
         "Node and asset names are EXACT, case-sensitive identifiers (e.g. 'APAC_Edge_Gateway', "
         "not 'APAC gateway'). If a lookup returns no results, do NOT repeatedly guess name "
         "variations — reason from the data you already have or run a broader scan instead. "
+        # --- Resolve informal location names before using them ---
+        "When the user refers to a compute node or location by an informal, partial, or "
+        "ambiguous phrase (e.g. 'APAC gateway' rather than 'APAC_Edge_Gateway'), you MUST call "
+        "resolve_location FIRST to obtain the exact node name before calling "
+        "get_assets_in_location or check_compliance_boundary. If resolve_location returns "
+        "AMBIGUOUS, ask the user to choose — never substitute a different node (e.g. an "
+        "analytics or processor node) when a node whose name matches the phrase exists. "
         # --- Write discipline: never mutate the graph unless explicitly asked ---
         "Only call log_audit_finding when the user EXPLICITLY asks you to log, record, or "
         "write a finding. Do NOT log a finding as an automatic side effect of tracing, "

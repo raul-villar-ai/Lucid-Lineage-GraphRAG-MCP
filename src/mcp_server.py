@@ -34,6 +34,15 @@ def check_compliance_boundary(compute_node: str) -> str:
 
 
 @mcp.tool()
+def resolve_location(phrase: str) -> str:
+    """Resolves an informal or partial location phrase (e.g. 'APAC gateway') to an
+    EXACT Compute_Node name. Returns the exact name on a single match, or a
+    candidate list to disambiguate. Call this before a location-based tool when the
+    phrasing is not already an exact node name."""
+    return graph_tools.resolve_location(phrase)
+
+
+@mcp.tool()
 def log_audit_finding(asset_name: str, finding_type: str, details: str) -> str:
     """Logs an immutable compliance finding to the knowledge graph.
 
