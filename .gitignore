@@ -5,3 +5,6 @@ __pycache__/
 *.tfstate
 *.tfstate.backup
 CLAUDE.md
+
+# Per-run eval harness artifacts — the intended record is TESTCASES_LOG.md
+eval/*_results.json
