@@ -17,10 +17,10 @@ resource "google_vertex_ai_endpoint" "lucid_lineage_endpoint" {
   name         = "lucid-lineage-compliance-agent"
   display_name = "Lucid Lineage Sovereign Engine"
   location     = "europe-west2"
-  description  = "Managed API endpoint for the Lucid Lineage ADK Agent."
-  
+  description  = "Managed API endpoint for the Lucid Lineage LangChain compliance agent."
+
   labels = {
-    environment = "production"
+    environment = "sandbox"
     security    = "sc-cleared-boundary"
   }
 }
