@@ -78,6 +78,30 @@ A core principle is **single-source-of-truth**: all Cypher business logic lives 
 * **Nodes:** `Data_Asset`, `Compute_Node`, `Compliance_Boundary`, `Service_Account`, `Audit_Finding` (plus `Session` / `Message` for chat memory).
 * **Edges:** `STORED_ON`, `REPLICATED_TO`, `GOVERNED_BY`, `HAS_ACCESS`, `HAS_AUDIT_RECORD`.
 
+## Known Limitations
+
+Lucid Lineage has two layers with very different reliability characteristics, and the
+boundary between them matters when interpreting output:
+
+* **Deterministic query layer** (`src/graph_tools.py`, `src/graph_admin.py`) — parameterized
+  Cypher with fixed semantics. Once a query is correct it stays correct and is reproducible
+  run-to-run: the cross-boundary leak scan returns the same distinct-asset set every time, and
+  `resolve_location()` maps a location phrase to a node name by fixed rules.
+* **Agent reasoning layer** (`src/agent.py` + the LLM) — probabilistic. It decides which tools to
+  call and how to phrase answers, and it can err *even when the underlying data is correct* — most
+  notably by (a) reporting a row count instead of the DISTINCT-asset count, and (b) resolving an
+  informal location phrase to the wrong node under conversational context drift.
+
+Concrete example from this project's own testing: asked in-session about "the APAC gateway
+location" after two turns about a *different* APAC node, the agent resolved it to
+`APAC_Singapore_Analytics` instead of `APAC_Edge_Gateway` (and logged a mis-targeted audit finding
+off that); separately it reported "3 Highly_Restricted assets" for what were 2 distinct assets
+across 3 boundary-crossing paths. The mitigations for these — a `classification`-aware leak count
+returned by the tool itself, and a deterministic `resolve_location` step the agent is instructed
+to call before any location lookup — **reduce** these error modes but do **not** eliminate them;
+the reasoning layer remains probabilistic. Treat agent output as decision support, and rely on the
+deterministic tools / the graph directly for anything authoritative.
+
 ## Setup Instructions
 Create a `.env` file in the root directory:
 ```env
