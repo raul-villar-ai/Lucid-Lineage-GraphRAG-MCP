@@ -191,6 +191,8 @@ def security_status() -> dict:
     Returns ``{level, leaks, ungoverned_assets, weak_encryption_assets}``.
     """
     with get_driver().session() as session:
+        # `c1 <> c2` here (not the tool's `c1.name < c2.name`) is intentional: this scan
+        # only returns count(DISTINCT d), so counting each pair both ways is harmless.
         leaks = session.run(
             """
             MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)
@@ -240,6 +242,8 @@ def security_status_for_assets(asset_names: list[str]) -> dict:
         return _classify(0, 0, 0)
 
     with get_driver().session() as session:
+        # `c1 <> c2` here (not the tool's `c1.name < c2.name`) is intentional: this scan
+        # only returns count(DISTINCT d), so counting each pair both ways is harmless.
         leaks = session.run(
             """
             MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)

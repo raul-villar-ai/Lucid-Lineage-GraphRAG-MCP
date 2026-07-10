@@ -204,6 +204,9 @@ def query_restricted_asset_leaks() -> str:
     The headline count reports DISTINCT affected assets; the JSON detail still
     lists every offending node/boundary pairing for drill-down.
     """
+    # Predicate intentionally differs from graph_admin's `c1 <> c2` (do NOT "unify"):
+    # this tool lists one row per offending pair, so canonical `c1.name < c2.name`
+    # returns each unordered pair once — `c1 <> c2` would duplicate them (A->B and B->A).
     query = """
     MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)
     MATCH (d)-[:STORED_ON|REPLICATED_TO]->(c2:Compute_Node)-[:GOVERNED_BY]->(b2:Compliance_Boundary)
