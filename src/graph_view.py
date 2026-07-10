@@ -22,12 +22,9 @@ Node ``id`` == entity name (names are unique in this graph), which lets us map
 the agent's ``touched_assets`` / ``touched_locations`` straight onto node ids.
 """
 
-import logging
 import streamlit as st
 
 from src.db import get_driver
-
-log = logging.getLogger("lucid_lineage.graph_view")
 
 # Core infrastructure only — chat-memory (Session/Message), Audit_Finding, and the
 # internal _GraphBaseline node are excluded to keep the view legible.

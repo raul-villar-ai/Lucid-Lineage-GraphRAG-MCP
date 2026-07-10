@@ -38,7 +38,7 @@ A core principle is **single-source-of-truth**: all Cypher business logic lives 
 * `src/llm.py` — LLM factory & **provider toggle**: builds either Google Gemini (`gemini-3.5-flash`) or OpenAI (`gpt-4o-mini`), selected via `LLM_PROVIDER` in `.env` (or the `DEFAULT_PROVIDER` constant). Single source of truth for model config.
 
 ### Data access layer
-* `src/graph_tools.py` — The unified Cypher query layer; all Neo4j business logic. Six tools: asset-lineage trace, co-location "blast radius", compliance-boundary check, write audit finding, retrieve past findings, and the cross-boundary leak scan. The leak scan requires the two compute nodes to be **physically different** (`c1 <> c2`) and applies a **canonical ordering** (`c1.name < c2.name`), so a single node governed by multiple boundaries is not mis-reported as a leak and each incident is counted once; the headline reports **distinct affected assets**. All queries are parameterized (injection-safe).
+* `src/graph_tools.py` — The unified Cypher query layer; all Neo4j business logic. Six tools: asset-lineage trace, co-location "blast radius", compliance-boundary check, write audit finding, retrieve past findings, and the cross-boundary leak scan. The leak scan excludes the false positive where a single node governed by multiple boundaries would otherwise look like a leak, and counts each incident once — but the two call sites use *different, individually-correct* predicates for this: the tool (`query_restricted_asset_leaks`) applies a **canonical ordering** (`c1.name < c2.name`) so every offending node pair is listed exactly once for drill-down, while the parallel security-light scans in `src/graph_admin.py` use the equivalent **identity guard** (`c1 <> c2`) because they only need a distinct-asset count. Both yield the same set of affected assets; the headline reports **distinct affected assets**. All queries are parameterized (injection-safe).
 * `src/db.py` — Thread-safe singleton Neo4j driver (bounded connection pool + acquisition timeout), plus connectivity verification and graceful shutdown.
 * `src/graph_admin.py` — Graph administration & health: reseeds the graph from the canonical Cypher, detects drift from the seeded baseline (SHA-256 fingerprint), and computes the security "traffic light". Exposes a whole-graph scan (`security_status`), an **asset-scoped** scan (`security_status_for_assets`) and a location→assets resolver (`assets_on_locations`) so the light can reflect the specific submission; a shared `_classify` helper keeps the RED/AMBER/GREEN logic identical across both scans. The leak component of each scan also uses the `c1 <> c2` guard.
 
@@ -69,7 +69,7 @@ A core principle is **single-source-of-truth**: all Cypher business logic lives 
 * `infra/variables.tf` — Terraform input variables (`project_id`, `region`, `streamlit_service_name`).
 
 ### Configuration & documentation
-* `.env` — Secrets/config: Neo4j credentials, provider toggle, LLM API key(s), `PROJECT_ID` (gitignored).
+* `.env` — Secrets/config: Neo4j credentials, provider toggle, and LLM API key(s) (gitignored). Note: `PROJECT_ID` is **not** read from `.env` — it is a Terraform input variable (`infra/variables.tf`), supplied at `terraform apply` time.
 * `requirements.txt` — Python dependencies, aligned to the code's actual direct imports (includes `st-link-analysis` for the graph tab).
 * `ARCHITECTURE.md`: Core system architecture, target state, and graph schema.
 * `CLEANUP_LOG.md`: Housekeeping audit trail (what was reviewed/removed and why).
