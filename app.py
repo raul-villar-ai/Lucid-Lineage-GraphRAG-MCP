@@ -12,6 +12,7 @@ from src.graph_admin import (
     security_status_for_assets,
     assets_on_locations,
 )
+from src.graph_view import render_graph_tab, load_base_graph
 
 # Initialize observability
 init_telemetry()
@@ -148,6 +149,18 @@ def compute_submission_status(details: dict):
     except Exception:
         return None
 
+
+def record_submission_scope(details: dict) -> None:
+    """Persist which nodes the last query touched, for the graph tab to highlight.
+
+    Stored in session_state so the (separate) knowledge-graph tab can read it on
+    the automatic rerun — no manual refresh, no re-query of the graph.
+    """
+    st.session_state.last_scope = {
+        "assets": list(details.get("touched_assets") or []),
+        "locations": list(details.get("touched_locations") or []),
+    }
+
 # 3. Configure Streamlit Page Layout
 st.set_page_config(page_title="Lucid Lineage: Forensic Workspace", layout="wide")
 
@@ -188,6 +201,7 @@ if st.sidebar.button("Reset Session"):
     st.session_state.session_id = str(uuid.uuid4())
     st.session_state.chat_history = []
     st.session_state.pop("last_security", None)  # clear traffic light until next query
+    st.session_state.pop("last_scope", None)     # clear graph highlight until next query
     st.rerun()
 
 # --- Graph Controls ---
@@ -203,6 +217,8 @@ if st.sidebar.button("♻️ Reset Graph to Seed",
             st.session_state.session_id = str(uuid.uuid4())
             st.session_state.chat_history = []
             st.session_state.pop("last_security", None)  # traffic light off until next query
+            st.session_state.pop("last_scope", None)     # graph highlight off until next query
+            load_base_graph.clear()                      # drop cached graph so the tab re-queries the new seed
             if summary["errors"]:
                 st.sidebar.warning(
                     f"Reset completed with {len(summary['errors'])} statement error(s)."
@@ -217,58 +233,66 @@ if st.sidebar.button("♻️ Reset Graph to Seed",
 graph_state_ph = st.sidebar.empty()
 render_graph_state(graph_state_ph)
 
-# 7. Main Workspace Layout UI
+# 7. Main Workspace — two tabs: the forensic chat, and the live knowledge graph
 st.title("Lucid Lineage: Forensic Workspace")
 st.caption("Immutable Graph-Based Auditing Engine")
 
-# Security traffic light — reflects the LAST query's result (off until a query runs)
-st.subheader("🚦 Security Status")
-security_ph = st.empty()
-render_security_light(security_ph, st.session_state.get("last_security"))
+tab_chat, tab_graph = st.tabs(["🔎 Forensic Workspace", "🕸️ Knowledge Graph"])
 
-st.divider()
-
-# Display initialization status if conversation hasn't started
-if not st.session_state.chat_history:
-    st.info("🤖 Initializing secure session. Ready to trace data lineage.")
-
-# Render previous turns from the current UI session state
-for message in st.session_state.chat_history:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
-
-# 8. Chat Ingestion and Backend Pipeline
-if prompt := st.chat_input("Trace the lineage..."):
-    
-    # Immediately render and save the user's input to the interface
-    with st.chat_message("user"):
-        st.write(prompt)
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
-    
-    # Process the pipeline with a loading indicator
-    with st.spinner("Analyzing data lineage via graph memory..."):
-        details = run_trace(
-            session_id=st.session_state.session_id,
-            query=prompt,
-            clearance=clearance,
-            iam_role=iam_role,
-            agent_llm=live_agent,
-            return_details=True,  # also surfaces which asset(s) this submission investigated
-        )
-
-        # ---> Apply the cleaning function before rendering <---
-        final_response = clean_agent_response(details["answer"])
-    
-    # Render and save the live AI output if successfully returned
-    if final_response:
-        with st.chat_message("assistant"):
-            st.write(final_response)
-        st.session_state.chat_history.append({"role": "assistant", "content": final_response})
-    else:
-        st.error("Trace failed. Check your terminal logs for Neo4j or API exceptions.")
-
-    # Capture the security posture as of THIS query (scoped to what it touched),
-    # then refresh the indicators.
-    st.session_state.last_security = compute_submission_status(details)
+with tab_chat:
+    # Security traffic light — reflects the LAST query's result (off until a query runs)
+    st.subheader("🚦 Security Status")
+    security_ph = st.empty()
     render_security_light(security_ph, st.session_state.get("last_security"))
-    render_graph_state(graph_state_ph)
+
+    st.divider()
+
+    # Display initialization status if conversation hasn't started
+    if not st.session_state.chat_history:
+        st.info("🤖 Initializing secure session. Ready to trace data lineage.")
+
+    # Render previous turns from the current UI session state
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+
+    # 8. Chat Ingestion and Backend Pipeline
+    if prompt := st.chat_input("Trace the lineage..."):
+
+        # Immediately render and save the user's input to the interface
+        with st.chat_message("user"):
+            st.write(prompt)
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+
+        # Process the pipeline with a loading indicator
+        with st.spinner("Analyzing data lineage via graph memory..."):
+            details = run_trace(
+                session_id=st.session_state.session_id,
+                query=prompt,
+                clearance=clearance,
+                iam_role=iam_role,
+                agent_llm=live_agent,
+                return_details=True,  # also surfaces which asset(s) this submission investigated
+            )
+
+            # ---> Apply the cleaning function before rendering <---
+            final_response = clean_agent_response(details["answer"])
+
+        # Render and save the live AI output if successfully returned
+        if final_response:
+            with st.chat_message("assistant"):
+                st.write(final_response)
+            st.session_state.chat_history.append({"role": "assistant", "content": final_response})
+        else:
+            st.error("Trace failed. Check your terminal logs for Neo4j or API exceptions.")
+
+        # Capture the security posture and the touched subgraph as of THIS query,
+        # then refresh the indicators. The graph tab picks up last_scope on this
+        # same rerun — no manual refresh needed.
+        st.session_state.last_security = compute_submission_status(details)
+        record_submission_scope(details)
+        render_security_light(security_ph, st.session_state.get("last_security"))
+        render_graph_state(graph_state_ph)
+
+with tab_graph:
+    render_graph_tab()

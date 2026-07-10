@@ -24,3 +24,8 @@ opentelemetry-sdk>=1.43.0
 streamlit>=1.58.0
 python-dotenv>=1.2.2
 requests>=2.34.2
+
+# ─── Knowledge-graph visualization (Cytoscape.js Streamlit component) ────
+# Keyed Streamlit component: reconciles in place on rerun (no iframe reload),
+# so the graph tab updates as the chat progresses without flicker.
+st-link-analysis>=0.4.0
