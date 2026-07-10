@@ -22,5 +22,5 @@
 
 * **Primary Question:** "Trace the lineage of Cardholder_Transaction_Vault and flag any cross-boundary leaks."
 * **Follow-up 1:** "What compliance policy governs that analytics node it replicates to?"  *(steers context toward `APAC_Singapore_Analytics` / `APAC_Data_Sovereignty`)*
-* **Follow-up 2 (the trap):** "Now identify all upstream dependencies feeding directly into the APAC gateway location."
-  * **Expected:** resolves "APAC gateway" to **`APAC_Edge_Gateway`** (NOT `APAC_Singapore_Analytics`); the upstream feeders are `Global_Supply_Telemetry` (from `US_HQ_Mainframe_Vault`) and `APAC_Regional_Sales` (from `APAC_Tokyo_Cloud_01`).
+* **Follow-up 2 (the trap):** "Identify all upstream dependencies feeding directly into the APAC gateway location. Which source components are responsible for that pipeline?"  *(verbatim the original failing question — a one-to-one regression test)*
+  * **Expected:** resolves "APAC gateway" to **`APAC_Edge_Gateway`** (NOT `APAC_Singapore_Analytics`), lists the `REPLICATED_TO` feeders `Global_Supply_Telemetry` and `APAC_Regional_Sales`, **and** traces them back to the responsible source components **`US_HQ_Mainframe_Vault`** (via Global_Supply_Telemetry) and **`APAC_Tokyo_Cloud_01`** (via APAC_Regional_Sales).

@@ -83,9 +83,9 @@ TESTCASES = [
              "expect": ["Cardholder_Transaction_Vault"]},
             {"q": "What compliance policy governs that analytics node it replicates to?",
              "expect": ["APAC_Data_Sovereignty"]},
-            {"q": "Now identify all upstream dependencies feeding directly into the APAC "
-                  "gateway location.",
-             "expect": ["APAC_Edge_Gateway"]},
+            {"q": "Identify all upstream dependencies feeding directly into the APAC "
+                  "gateway location. Which source components are responsible for that pipeline?",
+             "expect": ["APAC_Edge_Gateway", "US_HQ_Mainframe_Vault", "APAC_Tokyo_Cloud_01"]},
         ],
     },
 ]
