@@ -84,12 +84,15 @@ def retrieve_past_findings(asset_name: str) -> str:
 
 
 @tool
-def audit_restricted_asset_leaks() -> str:
+def audit_restricted_asset_leaks(classification: str = "") -> str:
     """Scans the ENTIRE graph for data assets that cross compliance boundaries.
     Detects assets stored or replicated across compute nodes governed by DIFFERENT
     compliance policies. This is the primary breach detection scan.
-    Use this when asked to run a full compliance audit or check for data leaks."""
-    return graph_tools.query_restricted_asset_leaks()
+    Use this when asked to run a full compliance audit or check for data leaks.
+    Optionally pass ``classification`` (e.g. 'Highly_Restricted') to scope the scan
+    to one class; the tool then reports the DISTINCT-asset count for that class, so
+    report that number exactly as stated rather than counting rows yourself."""
+    return graph_tools.query_restricted_asset_leaks(classification or None)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -305,6 +308,9 @@ def run_trace(session_id, query, clearance, iam_role="Security_Analyst",
         "When the user asks about a specific data classification (e.g. 'Highly_Restricted'), "
         "restrict your answer AND any counts to assets of that exact classification; never "
         "report the unfiltered total as if it answered the narrower question. "
+        "For a classification-scoped leak audit, pass that classification to "
+        "audit_restricted_asset_leaks and report the DISTINCT-asset count exactly as the tool "
+        "states it. "
         "Report counts as the number of DISTINCT affected assets, not the number of rows a "
         "tool returns — a single asset may appear in several rows. "
         # --- Ground findings strictly in retrieved data ---

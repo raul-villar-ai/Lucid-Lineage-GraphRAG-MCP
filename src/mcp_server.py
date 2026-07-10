@@ -51,10 +51,12 @@ def retrieve_past_findings(asset_name: str) -> str:
 
 
 @mcp.tool()
-def audit_restricted_asset_leaks() -> str:
+def audit_restricted_asset_leaks(classification: str = "") -> str:
     """Scans the entire graph for data assets crossing compliance boundaries.
-    This is the primary breach detection scan — use for full compliance audits."""
-    return graph_tools.query_restricted_asset_leaks()
+    This is the primary breach detection scan — use for full compliance audits.
+    Optionally pass a classification (e.g. 'Highly_Restricted') to scope the scan;
+    the summary then reports the distinct-asset count for that class."""
+    return graph_tools.query_restricted_asset_leaks(classification or None)
 
 
 if __name__ == "__main__":

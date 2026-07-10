@@ -180,12 +180,17 @@ def query_past_findings(asset_name: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════
 
 @trace_tool()
-def query_restricted_asset_leaks() -> str:
+def query_restricted_asset_leaks(classification: str | None = None) -> str:
     """Scan the entire graph for data assets that cross compliance boundaries.
 
     Detects assets stored or replicated across two DIFFERENT compute nodes that
     are governed by DIFFERENT compliance boundaries — the primary breach
     detection query.
+
+    When ``classification`` is provided (e.g. ``"Highly_Restricted"``) the scan is
+    restricted to assets of that exact classification and the summary reports the
+    DISTINCT-asset count for that class, so callers receive the count as a stated
+    fact instead of having to derive it from the raw rows.
 
     Correctness guards (both essential — see below):
 
@@ -211,6 +216,7 @@ def query_restricted_asset_leaks() -> str:
     MATCH (d:Data_Asset)-[:STORED_ON|REPLICATED_TO]->(c1:Compute_Node)-[:GOVERNED_BY]->(b1:Compliance_Boundary)
     MATCH (d)-[:STORED_ON|REPLICATED_TO]->(c2:Compute_Node)-[:GOVERNED_BY]->(b2:Compliance_Boundary)
     WHERE c1.name < c2.name AND b1 <> b2
+      AND ($classification IS NULL OR d.classification = $classification)
     RETURN DISTINCT
            d.name           AS asset,
            d.classification AS classification,
@@ -222,13 +228,14 @@ def query_restricted_asset_leaks() -> str:
            b2.policy        AS policy_b
     ORDER BY classification, asset, node_a, node_b
     """
+    scope = f"{classification} " if classification else ""
     try:
-        records = _run_read(query)
+        records = _run_read(query, classification=classification)
         if not records:
-            return "SUCCESS: No cross-boundary data leaks detected."
+            return f"SUCCESS: No cross-boundary {scope}data leaks detected."
         distinct_assets = sorted({r["asset"] for r in records})
         return (
-            f"ALERT: {len(distinct_assets)} asset(s) leaking across compliance "
+            f"ALERT: {len(distinct_assets)} {scope}asset(s) leaking across compliance "
             f"boundaries ({len(records)} boundary-crossing path(s) detected).\n"
             f"Leaking assets: {', '.join(distinct_assets)}\n"
             + json.dumps(records, indent=2)
