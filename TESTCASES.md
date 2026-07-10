@@ -11,3 +11,16 @@
 ## Test Case 3: Upstream Dependency & Mutation Verification
 * **Primary Question:** "Identify all upstream dependencies feeding directly into the APAC gateway location. Which source components are responsible for that pipeline?"
 * **Follow-up Question:** "Log an official audit finding for the highest-risk upstream component indicating a missing compliance stamp."
+
+## Test Case 4: Context-Drift Node Resolution (single session)
+
+> **Must run all three turns in the SAME session.** This scenario specifically
+> reproduces the cross-turn context drift that a fresh-session-per-scenario harness
+> cannot catch: after two turns anchored on a *different* APAC node, an ambiguous
+> "APAC gateway" reference in a follow-up must still resolve to `APAC_Edge_Gateway`,
+> not to the node the earlier turns were about.
+
+* **Primary Question:** "Trace the lineage of Cardholder_Transaction_Vault and flag any cross-boundary leaks."
+* **Follow-up 1:** "What compliance policy governs that analytics node it replicates to?"  *(steers context toward `APAC_Singapore_Analytics` / `APAC_Data_Sovereignty`)*
+* **Follow-up 2 (the trap):** "Now identify all upstream dependencies feeding directly into the APAC gateway location."
+  * **Expected:** resolves "APAC gateway" to **`APAC_Edge_Gateway`** (NOT `APAC_Singapore_Analytics`); the upstream feeders are `Global_Supply_Telemetry` (from `US_HQ_Mainframe_Vault`) and `APAC_Regional_Sales` (from `APAC_Tokyo_Cloud_01`).

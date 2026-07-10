@@ -70,6 +70,24 @@ TESTCASES = [
              "expect": ["finding"]},
         ],
     },
+    {
+        "id": 4,
+        "title": "Context-Drift Node Resolution (single session)",
+        # All turns share one session_id (like every scenario here), so this
+        # exercises cross-turn context drift: turns 1-2 anchor on a DIFFERENT APAC
+        # node, then turn 3's ambiguous "APAC gateway" must still resolve to
+        # APAC_Edge_Gateway rather than the node the prior turns were about.
+        "turns": [
+            {"q": "Trace the lineage of Cardholder_Transaction_Vault and flag any "
+                  "cross-boundary leaks.",
+             "expect": ["Cardholder_Transaction_Vault"]},
+            {"q": "What compliance policy governs that analytics node it replicates to?",
+             "expect": ["APAC_Data_Sovereignty"]},
+            {"q": "Now identify all upstream dependencies feeding directly into the APAC "
+                  "gateway location.",
+             "expect": ["APAC_Edge_Gateway"]},
+        ],
+    },
 ]
 
 
