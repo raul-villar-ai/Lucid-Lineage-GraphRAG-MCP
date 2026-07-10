@@ -31,7 +31,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from src.agent import run_trace
-from src.llm import build_llm
+from src.llm import build_llm, active_provider
 
 TESTCASES = [
     {
@@ -81,7 +81,8 @@ def _matched(text, keys):
 def main():
     llm = build_llm()
     mode = "LIVE" if llm is not None else "MOCK"
-    print(f"=== Lucid Lineage Test Harness ({mode} Gemini) ===")
+    # Reflect the actual active provider (src.llm toggle) rather than a hardcoded name.
+    print(f"=== Lucid Lineage Test Harness ({mode}, provider={active_provider()}) ===")
 
     results = []
     for tc in TESTCASES:
