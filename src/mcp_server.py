@@ -36,7 +36,11 @@ def check_compliance_boundary(compute_node: str) -> str:
 @mcp.tool()
 def log_audit_finding(asset_name: str, finding_type: str, details: str) -> str:
     """Logs an immutable compliance finding to the knowledge graph.
-    Use this to build up knowledge when you identify a breach or verify compliance."""
+
+    This is a WRITE that mutates the graph. Call it ONLY when the user explicitly
+    asks to log, record, or write a finding. Do NOT log a finding as an automatic
+    side effect of tracing, identifying, or auditing — those are read-only actions.
+    (Mirrors the write-discipline enforced in the LangChain agent's system prompt.)"""
     return graph_tools.write_audit_finding(asset_name, finding_type, details)
 
 
